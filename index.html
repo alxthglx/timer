@@ -1,0 +1,1118 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Timer &amp; Stopwatch</title>
+<script>
+  // Apply a saved Light/Dark choice before first paint, so dark mode never flashes white.
+  try {
+    const t = localStorage.getItem('timer-app.theme');
+    if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
+  } catch { /* storage unavailable */ }
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f4f3ef;
+    --surface: #ffffff;
+    --text: #1d1d1f;
+    --muted: #6e6e73;
+    --line: #e2e0da;
+    --track: #e9e7e1;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --danger: #d4372b;
+    --danger-soft: rgba(212, 55, 43, .18);
+    --good: #16884a;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #111113;
+      --surface: #1b1b1e;
+      --text: #f2f2f4;
+      --muted: #9b9ba3;
+      --line: #2d2d32;
+      --track: #28282d;
+      --accent: #6b9bff;
+      --accent-text: #0c0c0e;
+      --danger: #ff6a5f;
+      --danger-soft: rgba(255, 106, 95, .22);
+      --good: #43d17f;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #111113;
+    --surface: #1b1b1e;
+    --text: #f2f2f4;
+    --muted: #9b9ba3;
+    --line: #2d2d32;
+    --track: #28282d;
+    --accent: #6b9bff;
+    --accent-text: #0c0c0e;
+    --danger: #ff6a5f;
+    --danger-soft: rgba(255, 106, 95, .22);
+    --good: #43d17f;
+  }
+
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+  .app {
+    min-height: 100vh;
+    min-height: 100dvh;
+    max-width: 1180px;
+    margin: 0 auto;
+    padding: 24px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* Header */
+  .top { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+  h1 { margin: 0; font-size: 1.3rem; font-weight: 700; letter-spacing: -0.01em; }
+  .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+  .seg {
+    display: flex;
+    gap: 2px;
+    padding: 3px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 999px;
+  }
+  .seg button {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 30px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
+  .seg svg, .icon-btn svg { width: 18px; height: 18px; }
+
+  /* Buttons */
+  .btn {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 12px 8px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: var(--surface);
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    transition: background-color .15s, border-color .15s, color .15s, opacity .15s;
+  }
+  .btn:not(.primary):hover:not(:disabled) { border-color: var(--muted); }
+  .btn:disabled { opacity: .4; cursor: default; }
+  .btn.primary { flex-grow: 1.4; background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  .btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  .btn.primary.alt { background: transparent; color: var(--accent); }
+  .btn.primary.danger { background: var(--danger); border-color: var(--danger); color: var(--accent-text); }
+  .btn.add { flex: none; padding: 9px 16px; }
+  .icon-btn {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 32px;
+    height: 32px;
+    border: 0;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--muted);
+    cursor: pointer;
+  }
+  .icon-btn:hover { background: var(--line); color: var(--text); }
+
+  /* Grid of cards */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(272px, 1fr));
+    gap: 16px;
+    align-items: start;
+  }
+  .card {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 14px 16px 18px;
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 20px;
+    transition: border-color .2s, box-shadow .2s;
+  }
+  .card.selected { border-color: var(--accent); }
+  .card.ringing { border-color: var(--danger); box-shadow: 0 0 0 4px var(--danger-soft); }
+  .card-head { display: flex; align-items: center; gap: 6px; width: 100%; }
+  .name {
+    flex: 1;
+    min-width: 0;
+    padding: 4px 6px;
+    margin-left: -6px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-weight: 600;
+    text-overflow: ellipsis;
+  }
+  .name:hover { border-color: var(--line); }
+  .name:focus { outline: none; border-color: var(--accent); }
+  .kind {
+    color: var(--muted);
+    font-size: .68rem;
+    font-weight: 600;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .empty { margin: 48px 0; color: var(--muted); text-align: center; }
+
+  /* Dial */
+  .dial {
+    position: relative;
+    width: min(100%, 230px);
+    aspect-ratio: 1 / 1;
+    container-type: inline-size;
+  }
+  .ring { display: block; width: 100%; height: 100%; transform: rotate(-90deg); }
+  .ring circle { fill: none; stroke-width: 6; }
+  .ring .track { stroke: var(--track); transition: stroke .2s; }
+  .ring .bar { stroke: var(--accent); stroke-linecap: round; transition: stroke .2s; }
+  .face {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+  .face::before { content: ""; height: 1.2rem; } /* balances the caption so the digits sit centred */
+  .digits {
+    font-size: 2.3rem;
+    font-size: 16cqi;
+    font-weight: 300;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    white-space: nowrap;
+  }
+  .digits.long { font-size: 1.8rem; font-size: 12cqi; }
+  .caption { height: 1.2rem; color: var(--muted); font-size: .85rem; line-height: 1.2rem; white-space: nowrap; }
+
+  /* Timer input */
+  .edit { display: flex; align-items: flex-start; gap: .08em; font-size: 1.9rem; font-size: 13cqi; font-weight: 300; }
+  .field { display: flex; flex-direction: column; align-items: center; }
+  .field input {
+    width: 2.3ch;
+    padding: 0 0 .04em;
+    border: 0;
+    border-bottom: 2px solid var(--line);
+    border-radius: 0;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    text-align: center;
+    caret-color: var(--accent);
+  }
+  .field input:focus { outline: none; border-bottom-color: var(--accent); }
+  .field span { margin-top: 5px; color: var(--muted); font-size: .66rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .colon { line-height: 1.1; color: var(--muted); }
+
+  .presets { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+  .chip {
+    padding: 4px 9px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: transparent;
+    color: var(--muted);
+    font: inherit;
+    font-size: .78rem;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .chip:hover:not(:disabled) { color: var(--text); border-color: var(--muted); }
+  .chip:disabled { opacity: .35; cursor: default; }
+
+  .controls { display: flex; gap: 8px; width: 100%; }
+  .card .btn { padding: 11px 6px; font-size: .92rem; }
+
+  /* Laps */
+  .laps-wrap { width: 100%; font-variant-numeric: tabular-nums; font-size: .9rem; }
+  .laps { list-style: none; margin: 0; padding: 0; max-height: 216px; overflow-y: auto; }
+  .lap-row {
+    display: grid;
+    grid-template-columns: 1fr auto auto;
+    gap: 16px;
+    padding: 8px 2px;
+    border-bottom: 1px solid var(--line);
+  }
+  .lap-row .t { min-width: 7ch; text-align: right; }
+  .lap-row .total { color: var(--muted); }
+  .lap-row.head { padding-top: 0; color: var(--muted); font-size: .68rem; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; }
+  .lap-row.current { color: var(--muted); }
+  .lap-row.best .lap { color: var(--good); }
+  .lap-row.worst .lap { color: var(--danger); }
+
+  /* Alarm */
+  .card.ringing .dial { animation: pulse 1s ease-in-out infinite; }
+  .card.ringing .ring .track, .card.ringing .ring .bar { stroke: var(--danger); }
+  .card.ringing .digits { color: var(--danger); }
+  @keyframes pulse { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.035); } }
+  @media (prefers-reduced-motion: reduce) { .card.ringing .dial { animation: none; } }
+
+  /* Shortcut hint */
+  .hint { margin: auto 0 0; color: var(--muted); font-size: .8rem; line-height: 2; text-align: center; }
+  kbd {
+    padding: 1px 6px;
+    border: 1px solid var(--line);
+    border-bottom-width: 2px;
+    border-radius: 5px;
+    background: var(--surface);
+    font: inherit;
+    font-size: .75rem;
+  }
+  @media (hover: none) { .hint { display: none; } }
+</style>
+</head>
+<body>
+<main class="app">
+  <header class="top">
+    <h1>Timer &amp; Stopwatch</h1>
+    <div class="actions">
+      <button class="btn add" id="add-timer">+ Timer</button>
+      <button class="btn add" id="add-stopwatch">+ Stopwatch</button>
+      <div class="seg" role="group" aria-label="Theme">
+        <button data-theme-choice="system" aria-label="Match system theme" title="Match system">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></svg>
+        </button>
+        <button data-theme-choice="light" aria-label="Light theme" title="Light">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+        </button>
+        <button data-theme-choice="dark" aria-label="Dark theme" title="Dark">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <section class="grid" id="grid" aria-label="Timers and stopwatches"></section>
+  <p class="empty" id="empty" hidden>Nothing here yet. Add a timer or a stopwatch.</p>
+
+  <p class="hint">
+    Click a card, then <kbd>Space</kbd> start / pause &nbsp;·&nbsp; <kbd>R</kbd> reset &nbsp;·&nbsp; <kbd>L</kbd> lap &nbsp;·&nbsp; <kbd>Esc</kbd> silence all alarms
+  </p>
+</main>
+
+<template id="tpl-timer">
+  <article class="card" aria-label="Timer">
+    <div class="card-head">
+      <input class="name" aria-label="Timer name" maxlength="40" spellcheck="false" autocomplete="off">
+      <span class="kind">Timer</span>
+      <button class="icon-btn remove" aria-label="Remove timer" title="Remove">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="dial">
+      <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="track" cx="100" cy="100" r="92"/>
+        <circle class="bar" cx="100" cy="100" r="92"/>
+      </svg>
+      <div class="face">
+        <div class="edit">
+          <label class="field"><input inputmode="numeric" maxlength="2" autocomplete="off" aria-label="Hours"><span>hr</span></label>
+          <span class="colon" aria-hidden="true">:</span>
+          <label class="field"><input inputmode="numeric" maxlength="2" autocomplete="off" aria-label="Minutes"><span>min</span></label>
+          <span class="colon" aria-hidden="true">:</span>
+          <label class="field"><input inputmode="numeric" maxlength="2" autocomplete="off" aria-label="Seconds"><span>sec</span></label>
+        </div>
+        <div class="digits" role="timer" hidden></div>
+        <div class="caption" aria-live="polite"></div>
+      </div>
+    </div>
+    <div class="presets">
+      <button class="chip" data-sec="60">1 min</button>
+      <button class="chip" data-sec="300">5 min</button>
+      <button class="chip" data-sec="900">15 min</button>
+      <button class="chip" data-sec="1800">30 min</button>
+    </div>
+    <div class="controls">
+      <button class="btn" data-act="reset">Reset</button>
+      <button class="btn primary" data-act="main">Start</button>
+      <button class="btn" data-act="plus">+1 min</button>
+    </div>
+  </article>
+</template>
+
+<template id="tpl-stopwatch">
+  <article class="card" aria-label="Stopwatch">
+    <div class="card-head">
+      <input class="name" aria-label="Stopwatch name" maxlength="40" spellcheck="false" autocomplete="off">
+      <span class="kind">Stopwatch</span>
+      <button class="icon-btn remove" aria-label="Remove stopwatch" title="Remove">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+      </button>
+    </div>
+    <div class="dial">
+      <svg class="ring" viewBox="0 0 200 200" aria-hidden="true">
+        <circle class="track" cx="100" cy="100" r="92"/>
+        <circle class="bar" cx="100" cy="100" r="92"/>
+      </svg>
+      <div class="face">
+        <div class="digits" role="timer">00:00.00</div>
+        <div class="caption"></div>
+      </div>
+    </div>
+    <div class="controls">
+      <button class="btn" data-act="left" disabled>Lap</button>
+      <button class="btn primary" data-act="main">Start</button>
+    </div>
+    <div class="laps-wrap" hidden>
+      <div class="lap-row head" aria-hidden="true"><span>Lap</span><span class="t">Lap time</span><span class="t">Total</span></div>
+      <ol class="laps" aria-label="Laps"></ol>
+    </div>
+  </article>
+</template>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ---------- Utilities ---------- */
+
+  const $ = (id) => document.getElementById(id);
+  const now = () => performance.now(); // monotonic clock for all live timing
+  const pad = (n) => String(n).padStart(2, '0');
+  const num = (v, fallback = 0) => (Number.isFinite(v) ? v : fallback);
+  const setText = (el, s) => { if (el.textContent !== s) el.textContent = s; };
+  const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const store = {
+    get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+    set(k, v) { try { localStorage.setItem(k, v); } catch { /* storage unavailable */ } },
+  };
+
+  // Conversions between the monotonic clock and wall-clock time (needed to survive a reload).
+  const toEpoch = (perf) => Date.now() + (perf - now());
+  const fromEpoch = (epoch) => now() + (epoch - Date.now());
+  const clockLabel = (epoch) => new Date(epoch).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+  // Countdown rounds up, so "05:00" shows for the whole first second and "00:00" only at the end.
+  function fmtCountdown(ms) {
+    const total = Math.ceil(ms / 1000);
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    return h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+  }
+
+  // Elapsed time rounds down, with hundredths.
+  function fmtElapsed(ms, withHundredths = true) {
+    const cs = Math.floor(ms / 10);
+    const h = Math.floor(cs / 360000);
+    const m = Math.floor((cs % 360000) / 6000);
+    const s = Math.floor((cs % 6000) / 100);
+    const base = h ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`;
+    return withHundredths ? `${base}.${pad(cs % 100)}` : base;
+  }
+
+  const CIRC = 2 * Math.PI * 92;
+  function setRing(el, frac) {
+    const f = Math.min(1, Math.max(0, frac));
+    el.style.strokeDasharray = String(CIRC);
+    el.style.strokeDashoffset = String(CIRC * (1 - f));
+    el.style.opacity = f > 0.0005 ? '1' : '0'; // hide the round-cap dot at zero
+  }
+
+  /* ---------- Theme ---------- */
+
+  const themeButtons = [...document.querySelectorAll('[data-theme-choice]')];
+  function applyTheme(choice) {
+    const c = choice === 'light' || choice === 'dark' ? choice : 'system';
+    if (c === 'system') delete document.documentElement.dataset.theme;
+    else document.documentElement.dataset.theme = c;
+    themeButtons.forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.themeChoice === c)));
+    store.set('timer-app.theme', c);
+  }
+  themeButtons.forEach((b) => b.addEventListener('click', () => applyTheme(b.dataset.themeChoice)));
+  applyTheme(store.get('timer-app.theme'));
+
+  /* ---------- Alarm sound (Web Audio, shared by all timers) ---------- */
+
+  let actx = null;
+  let alarmOut = null;
+  let soundWanted = false;
+
+  // Browsers only allow audio after a user gesture, so this runs on clicks and key presses.
+  function unlockAudio() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    if (!actx) actx = new AC();
+    if (actx.state === 'suspended') actx.resume().catch(() => {});
+  }
+
+  function beep(at) {
+    const osc = actx.createOscillator();
+    const env = actx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.linearRampToValueAtTime(1, at + 0.01);
+    env.gain.exponentialRampToValueAtTime(0.001, at + 0.12);
+    osc.connect(env).connect(alarmOut);
+    osc.start(at);
+    osc.stop(at + 0.14);
+  }
+
+  // 60 s of triple beeps scheduled on the audio clock up front, so playback
+  // does not depend on JS timers (which browsers throttle in background tabs).
+  function startSound() {
+    stopSound();
+    if (!actx) return; // no gesture yet (e.g. right after a reload); retried on the next click
+    alarmOut = actx.createGain();
+    alarmOut.gain.value = 0.25;
+    alarmOut.connect(actx.destination);
+    const t0 = actx.currentTime + 0.05;
+    for (let sec = 0; sec < 60; sec++) {
+      for (let k = 0; k < 3; k++) beep(t0 + sec + k * 0.18);
+    }
+  }
+
+  function stopSound() {
+    if (alarmOut) { alarmOut.disconnect(); alarmOut = null; }
+  }
+
+  function alarmOn() {
+    soundWanted = true;
+    startSound(); // restarts the 60 s window if another timer was already ringing
+    const activated = !navigator.userActivation || navigator.userActivation.hasBeenActive;
+    if (navigator.vibrate && activated) navigator.vibrate([300, 150, 300, 150, 300]);
+  }
+
+  function refreshAlarm() {
+    if (!items.some((i) => i.state === 'done')) { soundWanted = false; stopSound(); }
+  }
+
+  // Deferred so a click on "Dismiss" is handled first and no stray beep starts.
+  for (const type of ['click', 'keydown']) {
+    document.addEventListener(type, () => {
+      unlockAudio();
+      setTimeout(() => { if (soundWanted && !alarmOut) startSound(); }, 0);
+    }, true);
+  }
+
+  /* ---------- Collection of cards ---------- */
+
+  const STORE_KEY = 'timer-app.v2';
+  const grid = $('grid');
+  let items = [];
+  let counters = { timer: 0, stopwatch: 0 };
+  let selectedId = null;
+  let saveQueued = false;
+
+  function save() {
+    if (saveQueued) return;
+    saveQueued = true;
+    queueMicrotask(() => {
+      saveQueued = false;
+      store.set(STORE_KEY, JSON.stringify({ v: 2, counters, items: items.map((i) => i.serialize()) }));
+    });
+  }
+
+  function addItem(item) {
+    items.push(item);
+    grid.append(item.el);
+    $('empty').hidden = true;
+  }
+
+  function removeItem(item) {
+    const busy = item.type === 'timer' ? item.state !== 'idle' : item.elapsed() > 0;
+    if (busy && !confirm(`Remove "${item.name}"?`)) return;
+    item.destroy();
+    items = items.filter((i) => i !== item);
+    if (selectedId === item.id) selectItem(items.length ? items[0].id : null);
+    $('empty').hidden = items.length > 0;
+    refreshAlarm();
+    updateTitle();
+    save();
+  }
+
+  function selectItem(id) {
+    selectedId = id;
+    for (const i of items) i.el.classList.toggle('selected', i.id === id);
+  }
+
+  const itemFor = (node) => {
+    const card = node.closest && node.closest('.card');
+    return card ? items.find((i) => i.el === card) : null;
+  };
+
+  /* ---------- Countdown timer ---------- */
+
+  const LIMITS = [99, 59, 59];
+  const MAX_SEC = 99 * 3600 + 59 * 60 + 59;
+  const MIN = 60000;
+  const clampSec = (s) => Math.max(0, Math.min(MAX_SEC, Math.round(s)));
+
+  class TimerItem {
+    constructor(d = {}) {
+      this.type = 'timer';
+      this.id = typeof d.id === 'string' ? d.id : uid();
+      this.name = typeof d.name === 'string' && d.name.trim() ? d.name : `Timer ${++counters.timer}`;
+      this.setSec = clampSec(num(d.setSec, 300));
+      this.state = 'idle'; // 'idle' | 'running' | 'paused' | 'done'
+      this.duration = 0;
+      this.remaining = 0;
+      this.endAt = 0;
+      this.timeout = 0;
+      this.build();
+    }
+
+    build() {
+      const el = $('tpl-timer').content.firstElementChild.cloneNode(true);
+      const q = (s) => el.querySelector(s);
+      this.el = el;
+      this.nameEl = q('.name');
+      this.bar = q('.bar');
+      this.edit = q('.edit');
+      this.display = q('.digits');
+      this.caption = q('.caption');
+      this.chips = [...el.querySelectorAll('.chip')];
+      this.inputs = [...el.querySelectorAll('.field input')];
+      this.btnMain = q('[data-act="main"]');
+      this.btnReset = q('[data-act="reset"]');
+
+      this.nameEl.value = this.name;
+      this.nameEl.addEventListener('input', () => { this.name = this.nameEl.value; updateTitle(); save(); });
+      this.nameEl.addEventListener('blur', () => {
+        if (!this.nameEl.value.trim()) { this.nameEl.value = this.name = 'Timer'; save(); }
+      });
+      q('.remove').addEventListener('click', () => removeItem(this));
+      this.btnMain.addEventListener('click', () => this.main());
+      this.btnReset.addEventListener('click', () => this.reset());
+      q('[data-act="plus"]').addEventListener('click', () => this.addMinute());
+      this.chips.forEach((b) => {
+        b.addEventListener('click', () => this.setInputs(Number(b.dataset.sec)));
+      });
+      this.inputs.forEach((input, i) => this.wireField(input, i));
+      this.writeInputs(this.setSec);
+      this.changed();
+    }
+
+    restore(d) {
+      if (d.state === 'paused' && num(d.remaining) > 0) {
+        this.state = 'paused';
+        this.remaining = d.remaining;
+        this.duration = Math.max(num(d.duration), d.remaining);
+      } else if ((d.state === 'running' || d.state === 'done') && Number.isFinite(d.endEpoch)) {
+        this.duration = Math.max(1, num(d.duration, 1));
+        this.endAt = fromEpoch(d.endEpoch);
+        if (d.state === 'running' && this.endAt > now()) {
+          this.state = 'running';
+          this.schedule();
+        } else {
+          this.finish(); // ended while the page was closed
+          return;
+        }
+      }
+      this.changed();
+    }
+
+    serialize() {
+      const d = { id: this.id, type: 'timer', name: this.name, setSec: this.setSec, state: this.state, duration: this.duration };
+      if (this.state === 'paused') d.remaining = this.remaining;
+      if (this.state === 'running' || this.state === 'done') d.endEpoch = toEpoch(this.endAt);
+      return d;
+    }
+
+    destroy() {
+      clearTimeout(this.timeout);
+      this.state = 'idle';
+      this.el.remove();
+    }
+
+    /* inputs */
+
+    fieldValue(i) { return Math.min(LIMITS[i], parseInt(this.inputs[i].value, 10) || 0); }
+    inputsSec() { return (this.fieldValue(0) * 60 + this.fieldValue(1)) * 60 + this.fieldValue(2); }
+
+    writeInputs(sec) {
+      this.inputs[0].value = pad(Math.floor(sec / 3600));
+      this.inputs[1].value = pad(Math.floor((sec % 3600) / 60));
+      this.inputs[2].value = pad(sec % 60);
+    }
+
+    setInputs(sec) {
+      this.setSec = clampSec(sec);
+      this.writeInputs(this.setSec);
+      this.changed();
+      save();
+    }
+
+    wireField(el, i) {
+      let keepSelection = false;
+      el.addEventListener('focus', () => { el.select(); keepSelection = true; });
+      el.addEventListener('mouseup', (e) => { if (keepSelection) { e.preventDefault(); keepSelection = false; } });
+      el.addEventListener('blur', () => { keepSelection = false; el.value = pad(this.fieldValue(i)); });
+      el.addEventListener('input', (e) => {
+        const digits = el.value.replace(/\D/g, '').slice(0, 2);
+        if (digits !== el.value) el.value = digits;
+        const typed = e.inputType && e.inputType.startsWith('insert');
+        if (typed && digits.length === 2 && i < 2) this.inputs[i + 1].focus();
+        this.setSec = this.inputsSec();
+        this.changed();
+        save();
+      });
+      el.addEventListener('keydown', (e) => {
+        keepSelection = false;
+        if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const span = LIMITS[i] + 1;
+          el.value = pad((this.fieldValue(i) + (e.key === 'ArrowUp' ? 1 : -1) + span) % span);
+          el.select();
+          this.setSec = this.inputsSec();
+          this.changed();
+          save();
+        } else if (e.key === 'Enter') {
+          e.preventDefault();
+          this.start();
+        }
+      });
+    }
+
+    /* actions */
+
+    schedule() {
+      // One setTimeout aimed at the end time; the animation loop also checks.
+      clearTimeout(this.timeout);
+      this.timeout = setTimeout(() => this.check(), Math.max(0, this.endAt - now()));
+    }
+
+    check() {
+      if (this.state !== 'running') return;
+      if (this.endAt - now() <= 0) this.finish();
+      else this.schedule();
+    }
+
+    start() {
+      if (this.state === 'running' || this.state === 'done') return;
+      if (this.state === 'idle') {
+        const sec = this.inputsSec();
+        if (!sec) return;
+        this.setSec = sec;
+        this.duration = this.remaining = sec * 1000;
+      }
+      unlockAudio();
+      if (this.inputs.includes(document.activeElement)) document.activeElement.blur();
+      this.endAt = now() + this.remaining;
+      this.state = 'running';
+      this.schedule();
+      this.changed();
+      save();
+      startLoop();
+    }
+
+    pause() {
+      if (this.state !== 'running') return;
+      this.remaining = Math.max(0, this.endAt - now());
+      clearTimeout(this.timeout);
+      this.state = 'paused';
+      this.changed();
+      save();
+    }
+
+    reset() {
+      const wasDone = this.state === 'done';
+      clearTimeout(this.timeout);
+      this.state = 'idle';
+      this.changed();
+      save();
+      if (wasDone) refreshAlarm();
+    }
+
+    finish() {
+      clearTimeout(this.timeout);
+      this.state = 'done';
+      this.remaining = 0;
+      this.changed();
+      save();
+      alarmOn();
+      this.el.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+    }
+
+    main() {
+      if (this.state === 'running') this.pause();
+      else if (this.state === 'done') this.reset();
+      else this.start();
+    }
+
+    addMinute() {
+      if (this.state === 'idle') { this.setInputs(this.inputsSec() + 60); return; }
+      if (this.state === 'done') {
+        this.duration = this.remaining = MIN;
+        this.state = 'paused';
+        refreshAlarm();
+        this.start();
+        return;
+      }
+      this.duration += MIN;
+      if (this.state === 'running') { this.endAt += MIN; this.schedule(); }
+      else this.remaining += MIN;
+      this.changed();
+      save();
+    }
+
+    /* rendering */
+
+    remainingMs() {
+      switch (this.state) {
+        case 'running': return Math.max(0, this.endAt - now());
+        case 'paused': return this.remaining;
+        case 'done': return 0;
+        default: return this.inputsSec() * 1000;
+      }
+    }
+
+    renderFace() {
+      const idle = this.state === 'idle';
+      const rem = this.remainingMs();
+      if (!idle) {
+        const txt = fmtCountdown(rem);
+        setText(this.display, txt);
+        this.display.classList.toggle('long', txt.length > 8);
+      }
+      setRing(this.bar, idle ? (rem > 0 ? 1 : 0) : (this.duration ? rem / this.duration : 0));
+    }
+
+    tick() {
+      if (this.state !== 'running') return false;
+      if (this.endAt - now() <= 0) this.finish();
+      this.renderFace();
+      return this.state === 'running';
+    }
+
+    changed() {
+      const s = this.state;
+      const idle = s === 'idle';
+      this.edit.hidden = !idle;
+      this.display.hidden = idle;
+      this.chips.forEach((b) => { b.disabled = !idle; });
+      let caption = '';
+      if (s === 'running') caption = `Ends at ${clockLabel(toEpoch(this.endAt))}`;
+      else if (s === 'paused') caption = 'Paused';
+      else if (s === 'done') caption = `Time's up · ${clockLabel(toEpoch(this.endAt))}`;
+      setText(this.caption, caption);
+      setText(this.btnMain, { idle: 'Start', running: 'Pause', paused: 'Resume', done: 'Dismiss' }[s]);
+      this.btnMain.classList.toggle('alt', s === 'running');
+      this.btnMain.classList.toggle('danger', s === 'done');
+      this.btnMain.disabled = idle && this.inputsSec() === 0;
+      this.btnReset.disabled = idle;
+      this.el.classList.toggle('ringing', s === 'done');
+      this.renderFace();
+      updateTitle();
+    }
+  }
+
+  /* ---------- Stopwatch ---------- */
+
+  function lapRow(label, lap, total, cls) {
+    const li = document.createElement('li');
+    li.className = `lap-row ${cls}`.trim();
+    const n = document.createElement('span');
+    const a = document.createElement('span');
+    const b = document.createElement('span');
+    n.textContent = label;
+    a.className = 't lap';
+    a.textContent = lap;
+    b.className = 't total';
+    b.textContent = total;
+    li.append(n, a, b);
+    return { li, lap: a, total: b };
+  }
+
+  class StopwatchItem {
+    constructor(d = {}) {
+      this.type = 'stopwatch';
+      this.id = typeof d.id === 'string' ? d.id : uid();
+      this.name = typeof d.name === 'string' && d.name.trim() ? d.name : `Stopwatch ${++counters.stopwatch}`;
+      this.running = false;
+      this.startAt = 0;
+      this.acc = 0;
+      this.laps = []; // total elapsed time at each lap press
+      this.currentLap = null;
+      this.build();
+    }
+
+    build() {
+      const el = $('tpl-stopwatch').content.firstElementChild.cloneNode(true);
+      const q = (s) => el.querySelector(s);
+      this.el = el;
+      this.nameEl = q('.name');
+      this.bar = q('.bar');
+      this.display = q('.digits');
+      this.caption = q('.caption');
+      this.btnMain = q('[data-act="main"]');
+      this.btnLeft = q('[data-act="left"]');
+      this.lapsWrap = q('.laps-wrap');
+      this.lapsList = q('.laps');
+
+      this.nameEl.value = this.name;
+      this.nameEl.addEventListener('input', () => { this.name = this.nameEl.value; updateTitle(); save(); });
+      this.nameEl.addEventListener('blur', () => {
+        if (!this.nameEl.value.trim()) { this.nameEl.value = this.name = 'Stopwatch'; save(); }
+      });
+      q('.remove').addEventListener('click', () => removeItem(this));
+      this.btnMain.addEventListener('click', () => this.main());
+      this.btnLeft.addEventListener('click', () => (this.running ? this.lap() : this.reset()));
+      this.changed();
+    }
+
+    restore(d) {
+      this.acc = Math.max(0, num(d.acc));
+      this.laps = Array.isArray(d.laps) ? d.laps.filter(Number.isFinite) : [];
+      if (d.running && Number.isFinite(d.startEpoch)) {
+        this.startAt = fromEpoch(d.startEpoch);
+        this.running = true;
+      }
+      this.renderLaps();
+      this.changed();
+    }
+
+    serialize() {
+      const d = { id: this.id, type: 'stopwatch', name: this.name, running: this.running, acc: this.acc, laps: this.laps };
+      if (this.running) d.startEpoch = toEpoch(this.startAt);
+      return d;
+    }
+
+    destroy() {
+      this.running = false;
+      this.el.remove();
+    }
+
+    elapsed() { return this.acc + (this.running ? now() - this.startAt : 0); }
+
+    main() {
+      if (this.running) {
+        this.acc = this.elapsed();
+        this.running = false;
+      } else {
+        this.startAt = now();
+        this.running = true;
+        startLoop();
+      }
+      this.changed();
+      save();
+    }
+
+    lap() {
+      if (!this.running) return;
+      this.laps.push(this.elapsed());
+      this.renderLaps();
+      this.changed();
+      save();
+    }
+
+    reset() {
+      this.running = false;
+      this.acc = 0;
+      this.laps = [];
+      this.renderLaps();
+      this.changed();
+      save();
+    }
+
+    renderLaps() {
+      this.lapsList.replaceChildren();
+      this.currentLap = null;
+      this.lapsWrap.hidden = this.laps.length === 0;
+      if (!this.laps.length) return;
+
+      const splits = this.laps.map((t, i) => t - (i ? this.laps[i - 1] : 0));
+      // Compare at displayed (1/100 s) resolution; mark fastest/slowest once there are 3+ laps.
+      const shown = splits.map((ms) => Math.floor(ms / 10));
+      let best = -1;
+      let worst = -1;
+      if (shown.length >= 3) {
+        const min = Math.min(...shown);
+        const max = Math.max(...shown);
+        if (min !== max) { best = shown.indexOf(min); worst = shown.indexOf(max); }
+      }
+
+      this.currentLap = lapRow(`Lap ${this.laps.length + 1}`, '', '', 'current');
+      this.lapsList.append(this.currentLap.li);
+      for (let i = splits.length - 1; i >= 0; i--) {
+        const cls = i === best ? 'best' : i === worst ? 'worst' : '';
+        this.lapsList.append(lapRow(`Lap ${i + 1}`, fmtElapsed(splits[i]), fmtElapsed(this.laps[i]), cls).li);
+      }
+    }
+
+    renderFace() {
+      const t = this.elapsed();
+      const txt = fmtElapsed(t);
+      setText(this.display, txt);
+      this.display.classList.toggle('long', txt.length > 8);
+      setRing(this.bar, (t % 60000) / 60000);
+      if (this.currentLap) {
+        setText(this.currentLap.lap, fmtElapsed(t - this.laps[this.laps.length - 1]));
+        setText(this.currentLap.total, txt);
+      }
+    }
+
+    tick() {
+      if (!this.running) return false;
+      this.renderFace();
+      return true;
+    }
+
+    changed() {
+      const t = this.elapsed();
+      const paused = !this.running && t > 0;
+      setText(this.btnMain, this.running ? 'Pause' : paused ? 'Resume' : 'Start');
+      this.btnMain.classList.toggle('alt', this.running);
+      setText(this.btnLeft, paused ? 'Reset' : 'Lap');
+      this.btnLeft.disabled = !this.running && !paused;
+      const parts = [];
+      if (paused) parts.push('Paused');
+      if (this.laps.length) parts.push(`Lap ${this.laps.length + 1}`);
+      setText(this.caption, parts.join(' · '));
+      this.renderFace();
+      updateTitle();
+    }
+  }
+
+  /* ---------- Render loop and tab title ---------- */
+
+  let raf = 0;
+  function frame() {
+    raf = 0;
+    let active = false;
+    for (const item of items) if (item.tick()) active = true;
+    if (active) raf = requestAnimationFrame(frame);
+  }
+  function startLoop() { if (!raf) raf = requestAnimationFrame(frame); }
+
+  // Runs on an interval (not rAF) so the title keeps updating while the tab is in the background.
+  const baseTitle = document.title;
+  function updateTitle() {
+    let t = baseTitle;
+    const done = items.find((i) => i.state === 'done');
+    const timers = items.filter((i) => i.type === 'timer' && i.state === 'running');
+    const watch = items.find((i) => i.type === 'stopwatch' && i.running);
+    if (done) {
+      t = `Time's up: ${done.name}`;
+    } else if (timers.length) {
+      const next = timers.reduce((a, b) => (a.endAt <= b.endAt ? a : b));
+      t = `${fmtCountdown(next.remainingMs())} · ${next.name}`;
+    } else if (watch) {
+      t = `${fmtElapsed(watch.elapsed(), false)} · ${watch.name}`;
+    }
+    if (document.title !== t) document.title = t;
+  }
+  setInterval(updateTitle, 250);
+
+  /* ---------- Input handling ---------- */
+
+  // Mouse clicks should not leave focus on a button (or in a text field), otherwise
+  // Space would re-activate that button instead of acting as the start/pause shortcut.
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('button')) return;
+    e.preventDefault();
+    const a = document.activeElement;
+    if (a && a.tagName === 'INPUT') a.blur();
+  });
+
+  // The card last clicked or focused receives the keyboard shortcuts.
+  document.addEventListener('pointerdown', (e) => { const it = itemFor(e.target); if (it) selectItem(it.id); });
+  document.addEventListener('focusin', (e) => { const it = itemFor(e.target); if (it) selectItem(it.id); });
+
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === 'Escape') {
+      items.filter((i) => i.state === 'done').forEach((i) => i.reset());
+      return;
+    }
+    const tag = e.target.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (tag === 'BUTTON' && (e.key === ' ' || e.key === 'Enter')) return; // keep native button activation
+    const item = items.find((i) => i.id === selectedId);
+    if (!item) return;
+    switch (e.key.toLowerCase()) {
+      case ' ':
+        e.preventDefault();
+        item.main();
+        break;
+      case 'r':
+        item.reset();
+        break;
+      case 'l':
+        if (item.type === 'stopwatch') item.lap();
+        break;
+    }
+  });
+
+  function addNew(Kind) {
+    const item = new Kind();
+    addItem(item);
+    selectItem(item.id);
+    item.el.scrollIntoView({ block: 'nearest', behavior: reduceMotion ? 'auto' : 'smooth' });
+    save();
+  }
+  $('add-timer').addEventListener('click', () => addNew(TimerItem));
+  $('add-stopwatch').addEventListener('click', () => addNew(StopwatchItem));
+
+  /* ---------- Init ---------- */
+
+  let saved = null;
+  try { saved = JSON.parse(store.get(STORE_KEY)); } catch { saved = null; }
+
+  if (saved && Array.isArray(saved.items)) {
+    counters = {
+      timer: Math.max(0, num(saved.counters && saved.counters.timer)),
+      stopwatch: Math.max(0, num(saved.counters && saved.counters.stopwatch)),
+    };
+    for (const d of saved.items) {
+      if (!d || typeof d !== 'object') continue;
+      const Kind = d.type === 'timer' ? TimerItem : d.type === 'stopwatch' ? StopwatchItem : null;
+      if (!Kind) continue;
+      const item = new Kind(d);
+      addItem(item);
+      item.restore(d);
+    }
+  } else {
+    // First visit: one of each. Reuse the duration saved by the previous single-timer version.
+    const legacy = parseInt(store.get('timer-app.last'), 10);
+    addItem(new TimerItem({ setSec: legacy > 0 ? legacy : 300 }));
+    addItem(new StopwatchItem());
+  }
+
+  $('empty').hidden = items.length > 0;
+  if (items.length) selectItem(items[0].id);
+  save();
+  startLoop();
+  updateTitle();
+})();
+</script>
+</body>
+</html>
